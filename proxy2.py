@@ -27,7 +27,7 @@ def join_with_script_dir(path):
 
 
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
-    address_family = socket.AF_INET6
+    #address_family = socket.AF_INET6
     daemon_threads = True
 
     def handle_error(self, request, client_address):
@@ -91,10 +91,12 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
             self.close_connection = 1
 
     def connect_relay(self):
+        proxy_server_ip = self.connection._sock.getsockname()[0]
+        source_address = (proxy_server_ip, 0) if proxy_server_ip != '127.0.0.1' else None
         address = self.path.split(':', 1)
         address[1] = int(address[1]) or 443
         try:
-            s = socket.create_connection(address, timeout=self.timeout)
+            s = socket.create_connection(address, timeout=self.timeout, source_address=source_address)
         except Exception as e:
             self.send_error(502)
             return
@@ -144,14 +146,15 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
         if netloc:
             req.headers['Host'] = netloc
         setattr(req, 'headers', self.filter_headers(req.headers))
-
+        proxy_server_ip = self.connection._sock.getsockname()[0]
+        source_address = (proxy_server_ip, 0) if proxy_server_ip != '127.0.0.1' else None
         try:
             origin = (scheme, netloc)
             if not origin in self.tls.conns:
                 if scheme == 'https':
-                    self.tls.conns[origin] = httplib.HTTPSConnection(netloc, timeout=self.timeout)
+                    self.tls.conns[origin] = httplib.HTTPSConnection(netloc, timeout=self.timeout, source_address=source_address)
                 else:
-                    self.tls.conns[origin] = httplib.HTTPConnection(netloc, timeout=self.timeout)
+                    self.tls.conns[origin] = httplib.HTTPConnection(netloc, timeout=self.timeout, source_address=source_address)
             conn = self.tls.conns[origin]
             conn.request(self.command, path, req_body, dict(req.headers))
             res = conn.getresponse()
@@ -171,6 +174,7 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
 
             res_body = res.read()
         except Exception as e:
+            print str(e)
             if origin in self.tls.conns:
                 del self.tls.conns[origin]
             self.send_error(502)
@@ -350,7 +354,7 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
                 m = re.search(r'<title[^>]*>\s*([^<]+?)\s*</title>', res_body, re.I)
                 if m:
                     h = HTMLParser()
-                    print with_color(32, "==== HTML TITLE ====\n%s\n" % h.unescape(m.group(1).decode('utf-8')))
+                    print with_color(32, "==== HTML TITLE ====\n%s\n" % h.unescape(m.group(1)))
             elif content_type.startswith('text/') and len(res_body) < 1024:
                 res_body_text = res_body
 
@@ -372,7 +376,7 @@ def test(HandlerClass=ProxyRequestHandler, ServerClass=ThreadingHTTPServer, prot
         port = int(sys.argv[1])
     else:
         port = 8080
-    server_address = ('::1', port)
+    server_address = ('0.0.0.0', port)
 
     HandlerClass.protocol_version = protocol
     httpd = ServerClass(server_address, HandlerClass)
